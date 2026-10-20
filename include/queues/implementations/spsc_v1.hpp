@@ -111,11 +111,18 @@ private:
         return requested + 1;
     }
 
+#ifdef __cpp_lib_hardware_interference_size
+    static constexpr size_t cacheLineSize =
+        std::hardware_destructive_interference_size;
+#else
+    static constexpr size_t cacheLineSize =
+        64; // fallback to amd64 sizes
+#endif
+
+
     const std::size_t capacity_; // Storage slots, including the spare.
-    // Align each index to the implementation's constructive interference size.
-    // This value is not necessarily 64 bytes and does not guarantee separate cache lines.
-    alignas(std::hardware_constructive_interference_size) std::atomic<size_t> head_{0}; // next slot to read
-    alignas(std::hardware_constructive_interference_size) std::atomic<size_t> tail_{0};  // next slot to write
+    alignas(cacheLineSize) std::atomic<size_t> head_{0}; // next slot to read
+    alignas(cacheLineSize) std::atomic<size_t> tail_{0};  // next slot to write
     std::vector<T> buffer_;
 };
 
