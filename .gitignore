@@ -3,6 +3,7 @@
 .vscode/
 *.swp
 *.user
+.venv/
 
 # Personal learning notes and working copies
 /.local-notes/

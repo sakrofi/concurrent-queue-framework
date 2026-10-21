@@ -52,7 +52,7 @@ TEST_CASE("Custom SPSC: invalid capacities are rejected", "[spsc][custom]") {
 
 TEMPLATE_LIST_TEST_CASE("SPSC: two threads transfer an ordered sequence",
                         "[spsc][concurrent]", QueueTypes) {
-    const int capacity = GENERATE(1, 3, 64);
+    const int capacity = GENERATE(1, 4, 64);
     TestType queue(capacity);
     constexpr int count = 100000;
     std::barrier start(2); // Producer thread + this test thread (the consumer).

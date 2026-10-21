@@ -58,6 +58,28 @@ Use `--dry-run` to inspect commands or `--summarize results/matrix-...` to recre
 summaries from saved raw CSVs. Build again after changing C++ source; the runner
 uses the existing executable.
 
-Benchmark data is exported only as CSV; `--output` chooses the prefix, not a format.
+### Plot latency and throughput
+
+Set up the optional Matplotlib dependency in a local virtual environment:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r tools/requirements-plot.txt
+
+# Run the matrix and generate charts after measurements finish
+.venv/bin/python tools/run_benchmark_matrix.py --plot
+
+# Regenerate summaries and charts for a saved matrix without running benchmarks
+.venv/bin/python tools/run_benchmark_matrix.py --summarize results/matrix-... --plot
+```
+
+The plotting function reads `throughput_summary.csv` and `latency_summary.csv`
+and saves one PNG per configuration under that matrix's `plots/` directory.
+Charts compare queues using throughput in millions of items/second and p50,
+p99, and p99.9 latency in microseconds. Bars use the existing summary medians;
+error bars show observed min/max. Latency percentiles are summarized across
+runs, not pooled. Running without `--plot` needs only Python's standard library.
+
+The C++ executable exports data as CSV; its `--output` chooses the prefix, not a format.
 For individual runs, `--affinity none` works without CPU pinning. Reusing an
 executable output prefix replaces its CSV; the matrix creates a fresh directory.

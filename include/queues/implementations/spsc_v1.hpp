@@ -45,47 +45,57 @@ public:
 
 
     // Exactly slots usable entries, plus one spare to distinguish full from empty.
-    explicit spsc_v1(const size_t slots)
-        : capacity_(storage_size(slots)),
-          buffer_(capacity_){}
+    explicit spsc_v1(const size_t req_slots)
+        :
+            requested_(req_slots),
+            capacity_(storage_size(req_slots)),
+            mask_(capacity_ - 1),
+            buffer_(capacity_){}
 
     using value_type = T;
 
-
+    // producer
     bool try_push(const T& item) {
 
-        const size_t tail = tail_.load(std::memory_order_relaxed);
+        // SPSC only this producer will write so relaxed
+        const size_t write_idx = write_idx_.load(std::memory_order_relaxed);
+        const size_t next_write_idx = next_idx(write_idx);
 
-        const size_t next_tail = next_index(tail);
 
-        if (next_tail == head_.load(std::memory_order_acquire)) {
-            return false;
+        // lazy load head
+        if (next_write_idx - cached_read_idx_ > requested_) {
+            // we assume its full
+            cached_read_idx_ = read_idx_.load(std::memory_order_acquire);
+            if (next_write_idx - cached_read_idx_ > requested_) {
+                return false;
+            }
         }
 
-        // Use the index already loaded, avoiding a second atomic load.
-        buffer_[tail] = item;
 
-        // Publish the item only after its write is complete.
-        tail_.store(next_tail, std::memory_order_release);
+        // mask only touches buffer
+        buffer_[write_idx & mask_] = item;
+        write_idx_.store(next_write_idx, std::memory_order_release);
         return true;
     }
 
 
-    // checks current head then reads
+    // consumer
     bool try_pop(T& item) {
 
-        // Only the consumer writes head_, so its own index needs no acquire.
-        const size_t head = head_.load(std::memory_order_relaxed);
-        const size_t next_head = next_index(head);
+        // Only consumer will read in SPSC this will never change so relaxed
+        const size_t read_idx = read_idx_.load(std::memory_order_relaxed);
 
-        // Acquire the producer's published index before reading its item.
-        if (head == tail_.load(std::memory_order_acquire)) {
-            return false;
+        if (read_idx_ == cached_write_idx_) {
+            cached_write_idx_ = write_idx_.load(std::memory_order_acquire);
+            if (read_idx_ == cached_write_idx_) {
+                return false;
+            }
         }
 
-        item = std::move(buffer_[head]);
-        // Finish reading before the producer can reuse this slot.
-        head_.store(next_head, std::memory_order_release);
+        item = std::move(buffer_[read_idx & mask_]);
+
+        const size_t next_head_idx = next_idx(read_idx);
+        read_idx_.store(next_head_idx, std::memory_order_release);
         return true;
     }
 
@@ -95,21 +105,30 @@ public:
 private:
 
     // The ring no longer needs power-of-two storage or a bit mask.
-    std::size_t next_index(std::size_t index) const {
-        ++index;
-        return index == capacity_ ? 0 : index;
+    std::size_t next_idx(std::size_t idx) const {
+        return idx + 1;
     }
 
     // Check that adding the spare slot is representable before allocating.
-    static std::size_t storage_size(std::size_t requested) {
-        if (requested == 0) {
+    static std::size_t storage_size(std::size_t req_slots) {
+        if (req_slots == 0) {
             throw std::invalid_argument("SPSC capacity must be positive");
         }
-        if (requested == std::numeric_limits<std::size_t>::max()) {
+        if (req_slots >= std::numeric_limits<std::size_t>::max()) {
             throw std::length_error("SPSC capacity is too large");
         }
-        return requested + 1;
+
+        const std::size_t target = req_slots + 1;
+        
+        // Cant exceed max power of 2
+        constexpr std::size_t max_power_of_two = std::numeric_limits<std::size_t>::max() / 2 + 1;
+        if (target > max_power_of_two) {
+            throw std::length_error("SPSC capacity exceeds maximum allowable power-of-two size");
+        }
+        return std::bit_ceil(target);
     }
+
+    
 
 #ifdef __cpp_lib_hardware_interference_size
     static constexpr size_t cacheLineSize =
@@ -119,18 +138,23 @@ private:
         64; // fallback to amd64 sizes
 #endif
 
-
+    const std::size_t requested_;
     const std::size_t capacity_; // Storage slots, including the spare.
-    alignas(cacheLineSize) std::atomic<size_t> head_{0}; // next slot to read
-    alignas(cacheLineSize) std::atomic<size_t> tail_{0};  // next slot to write
+    const std::size_t mask_;
+    alignas(cacheLineSize) std::atomic<size_t> read_idx_{0}; // next slot to read
+    alignas(cacheLineSize) std::atomic<size_t> write_idx_{0};  // next slot to write
+    alignas(cacheLineSize) std::size_t cached_read_idx_ {0};
+    alignas(cacheLineSize) std::size_t cached_write_idx_ {0};
+
     std::vector<T> buffer_;
 };
 
 
-
-
-
-
+//  5
+// producer
+// write
+// read
+// if read == write return
 
 
 

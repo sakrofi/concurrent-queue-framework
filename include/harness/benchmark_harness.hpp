@@ -25,6 +25,15 @@ namespace lab::harness {
     enum class MeasurementMode;
     using Clock = std::chrono::steady_clock; // elapsed without system-clock jumps
 
+
+    inline size_t get_adaptive_spin_limit (const size_t capacity) {
+        // scaled proportional to buffer size with sensible min and max for extremes
+        size_t scaled = capacity * 4;
+        return std::clamp(scaled, size_t(32), size_t(2048));
+    }
+
+
+
 struct RunResult {
     std::string queue;
     Workload workload;
@@ -51,8 +60,8 @@ struct WorkerResult {
     std::exception_ptr error; // An error exception is captured then thrown in main thread.
 };
 
-// This function is templated only on the queue with def in header so we can have multiple queue types
-// Mode is an ordinary setting.
+
+
 template<lab::queues::SpscQueue Queue>
 RunResult run_one_measurement(const std::string& name, const BenchmarkConfig& config,
                    const Workload& workload, MeasurementMode mode,
@@ -74,13 +83,15 @@ RunResult run_one_measurement(const std::string& name, const BenchmarkConfig& co
     WorkerResult produced, consumed;
     std::uint64_t consumer_state = 1; // Integer-mixing state for ConsumerWork; stays 1 for other workloads.
 
+    std::size_t max_retries = get_adaptive_spin_limit(config.capacity);
+
     // Both threads need the same start, exception handling, and finish signal.
     // 'task' is the producer or consumer lambda below, copied into its thread.
     auto launch_worker = [&](auto worker_task, WorkerResult& worker_result) {
         return std::jthread([&, worker_task] {
             //in each worker
             ready.count_down(); // tell main worker reached start gate
-            go.wait(); // wait for main to finish pinning and start the timer
+            go.wait(); // wait for main to start timer
             try { worker_task(); }
             catch (...) {
                 worker_result.error = std::current_exception();
@@ -90,6 +101,8 @@ RunResult run_one_measurement(const std::string& name, const BenchmarkConfig& co
             finished.fetch_add(1, std::memory_order_relaxed);
         });
     };
+
+
 
     std::jthread producer, consumer;
     try {
@@ -106,7 +119,12 @@ RunResult run_one_measurement(const std::string& name, const BenchmarkConfig& co
                 while (!queue.try_push(item)) {
                     ++retries;
                     if (stop.load(std::memory_order_relaxed)) return;
-                    if (retries % 64 == 0) std::this_thread::yield();
+
+                    if (retries <= max_retries) {
+                        continue;
+                    }
+                    // yield to save cycles as lagging
+                    std::this_thread::yield();
                 }
                 if (workload.type == WorkloadType::Bursty &&
                     (i + 1) % workload.burst_size == 0 && i + 1 < config.items) {
@@ -123,11 +141,20 @@ RunResult run_one_measurement(const std::string& name, const BenchmarkConfig& co
             for (std::size_t i = 0; i < config.items; ++i) {
                 if (stop.load(std::memory_order_relaxed)) return;
                 Payload item;
+
+
                 while (!queue.try_pop(item)) {
                     ++retries;
                     if (stop.load(std::memory_order_relaxed)) return;
-                    if (retries % 64 == 0) std::this_thread::yield();
+
+                    if (retries < max_retries) {
+                        continue;
+                    }
+                    std::this_thread::yield();
                 }
+
+
+
                 if (is_latency_measurement) {
                     const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                         Clock::now().time_since_epoch()).count();
@@ -192,6 +219,9 @@ RunResult run_one_measurement(const std::string& name, const BenchmarkConfig& co
     if (is_latency_measurement) result.latency = latency_stats(std::move(samples));
     return result;
 }
+
+
+
 
 std::vector<RunResult> run_benchmarks(const BenchmarkConfig& config,
                                      const std::vector<Workload>& workloads,

@@ -24,9 +24,6 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-
-# Starting counts but not guarantees of duration.
-# The C++ benchmark may stop early if the measured transfers are reached.
 # Workload, Mode, Measured Transfers, Discarded Warmup Transfers
 PROFILES = [
     ("baseline", "throughput", 100_000_000, 5_000_000),
@@ -38,7 +35,7 @@ PROFILES = [
 ]
 
 def capture(*args):
-    """To Read optional context; unavailable diagnostic tools should not stop a run."""
+    """To Read optional context wont stop run"""
     try:
         result = subprocess.run(args, cwd=ROOT, text=True, capture_output=True)
         return result.stdout.strip() if result.returncode == 0 else None
@@ -47,7 +44,7 @@ def capture(*args):
 
 
 def summarize(output):
-    """Summarize a single configuration per CSV file without altering them"""
+    """Summarises throughput and latency per CSV"""
     summaries = {"throughput": [], "latency": []}
 
     # New runs and the saved snapshot use raw/. Older runs have CSVs at the root.
@@ -70,11 +67,7 @@ def summarize(output):
                 raise ValueError(f"Mixed configurations in {path}; use one matrix case per CSV")
             summary.update(source=str(path.relative_to(output)), repetitions=len(group))
 
-            # Aggregate the median, min, and max of each metric across repetitions.
-            # This is not a pooled-sample statistic;
-            # it simply computes the median of the per-repetition values.
-            # For example, if the p99 latency values across repetitions are 10, 20, and 30 nanoseconds,
-            # the median p99 would be reported as 20 nanoseconds.
+            # Chooses value across repetitions not a pooled statistic
             metrics = ["elapsed_seconds", "items_per_second"]
             if first["mode"] == "latency":
                 metrics += ["p50_ns", "p99_ns", "p999_ns"]
@@ -128,10 +121,18 @@ def main():
     parser.add_argument("--seed", type=int, default=20261008)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--summarize", type=Path, help="Only regenerate summaries for an existing results directory")
+    parser.add_argument("--plot", action="store_true", help="Also create latency and throughput charts (requires matplotlib)")
     args = parser.parse_args()
+    if args.plot and (not args.dry_run or args.summarize):
+        try:
+            from visualise_results import plot_results
+        except ImportError:
+            parser.error("--plot requires matplotlib; install tools/requirements-plot.txt in your Python environment")
     if args.summarize:
         # This path only reads existing results; it never launches benchmarks.
         summarize(args.summarize.resolve())
+        if args.plot:
+            plot_results(args.summarize.resolve())
         return
     if args.repetitions < 1:
         parser.error("--repetitions must be positive")
@@ -197,7 +198,7 @@ def main():
         "cpu_governors": sorted({p.read_text().strip() for p in governors if p.exists()}),
         "build": build_context(binary),
         "seed": args.seed, "commands": [command for _, command in all_commands],
-        "retry_policy": "yield every 64 cumulative failed attempts per worker",
+        "retry_policy": "std::clamp(capacity * 4, 32, 2048)",
         "queue_order": ["boost", "moodycamel", "rigtorp", "custom"],
         "status": "running", "completed_cases": 0,
     }
@@ -235,6 +236,9 @@ def main():
         metadata["wall_seconds"] = time.monotonic() - started
         (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"Finished in {metadata['wall_seconds']:.0f}s. CSV summaries: {output}", flush=True)
+    if args.plot:
+        # Plot after recording completion so a chart error cannot invalidate measurements.
+        plot_results(output)
 
 
 if __name__ == "__main__":
