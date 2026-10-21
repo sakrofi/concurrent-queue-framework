@@ -11,11 +11,13 @@ and measures throughput and p50/p99/p99.9 transfer latency across CPU placements
 
 ## Results
 
-On a Ryzen 7 3700X, the custom queue reached a median **99 million transfers/s**
+On a Ryzen 7 3700X, the custom queue reached a median **328 million transfers/s**
 under continuous traffic on separate cores (requested capacity 1,024). Rigtorp
-reached 278 million/s; with simulated consumer work, all four were around 7 million/s.
+reached 318 million/s; with simulated consumer work, all four were around 7 million/s.
 
-[Results, limitations, and full measurements →](benchmark-results/2026-10-08-ryzen-3700x/RESULTS.md)
+![Continuous throughput on separate cores, capacity 1,024](benchmark-results/2026-10-21-ryzen-3700x/plots/baseline-throughput-cores-cap1024.png)
+
+[Results and full measurements →](benchmark-results/2026-10-21-ryzen-3700x/RESULTS.md)
 
 These are measurements of the queues under this harness's retry policy and tested
 conditions. They illustrate how workload and placement affect the comparison.
@@ -76,9 +78,7 @@ python3 -m venv .venv
 The plotting function reads `throughput_summary.csv` and `latency_summary.csv`
 and saves one PNG per configuration under that matrix's `plots/` directory.
 Charts compare queues using throughput in millions of items/second and p50,
-p99, and p99.9 latency in microseconds. Bars use the existing summary medians;
-error bars show observed min/max. Latency percentiles are summarized across
-runs, not pooled. Running without `--plot` needs only Python's standard library.
+p99, and p99.9 latency in microseconds.
 
 The C++ executable exports data as CSV; its `--output` chooses the prefix, not a format.
 For individual runs, `--affinity none` works without CPU pinning. Reusing an
