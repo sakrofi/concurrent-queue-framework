@@ -50,7 +50,7 @@ void append_runs(std::vector<RunResult>& results, const char* name,
     }
 }
 
-// CSV quotes are doubled so even a name containing a comma or quote is readable by Python.
+// CSV quotes doubled so a name containing a comma guaranteed to not be another row.
 std::string csv_string(const std::string& value) {
     std::string out = "\"";
     for (char ch : value) {
@@ -80,8 +80,8 @@ void export_csv(const std::vector<RunResult>& results, const std::filesystem::pa
     if (!prefix.parent_path().empty()) std::filesystem::create_directories(prefix.parent_path());
     std::ofstream csv(prefix.string() + ".csv");
     if (!csv) throw std::runtime_error("Cannot open CSV output file");
-    csv.imbue(std::locale::classic()); // Always use a decimal point, not a locale's decimal comma.
-    csv << std::setprecision(17);
+    csv.imbue(std::locale::classic()); // Defensive formatting to prevent 1,25. May not need
+    csv << std::setprecision(17); // preserve precision as this is a benchmark
     csv << "queue,workload,mode,repetition,requested_capacity,items,warmup_items,affinity,"
            "producer_cpu,consumer_cpu,consumer_iterations,burst_size,burst_gap_us,"
            "elapsed_seconds,items_per_second,failed_pushes,failed_pops,latency_samples,"
