@@ -1,4 +1,4 @@
-# Configurable Concurrent Queue Harness 
+# Concurrent Queue Framework
 
 A C++20 learning project exploring single-producer/single-consumer queues. I built
 an atomic ring buffer and a harness to compare it with Boost, Rigtorp, and
